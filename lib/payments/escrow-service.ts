@@ -9,6 +9,21 @@
 import { prisma } from "@/lib/prisma";
 import type { Escrow } from "@prisma/client";
 
+/** Thrown when an optimistic-locking version check fails (concurrent modification). */
+export class EscrowConflictError extends Error {
+  public readonly escrowId: string;
+  public readonly expectedVersion: number;
+
+  constructor(escrowId: string, expectedVersion: number) {
+    super(
+      `Escrow ${escrowId} version ${expectedVersion} was modified concurrently`,
+    );
+    this.name = "EscrowConflictError";
+    this.escrowId = escrowId;
+    this.expectedVersion = expectedVersion;
+  }
+}
+
 export type EscrowStatus =
   | "pending_funding"
   | "funded_authorized"
@@ -108,20 +123,22 @@ export async function attachPaymentIntent(
   escrowId: string,
   paymentIntentId: string,
 ): Promise<EscrowRecord | null> {
-  const existing = await prisma.escrow.findUnique({
-    where: { id: escrowId },
-  });
-  if (!existing) return null;
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.escrow.findUnique({
+      where: { id: escrowId },
+    });
+    if (!existing) return null;
 
-  const row = await prisma.escrow.update({
-    where: { id: escrowId, version: existing.version },
-    data: {
-      paymentIntentId,
-      version: { increment: 1 },
-    },
-  });
+    const row = await tx.escrow.update({
+      where: { id: escrowId, version: existing.version },
+      data: {
+        paymentIntentId,
+        version: { increment: 1 },
+      },
+    });
 
-  return toRecord(row);
+    return toRecord(row);
+  });
 }
 
 export async function findEscrowByPaymentIntent(
@@ -135,7 +152,7 @@ export async function findEscrowByPaymentIntent(
 
 /**
  * Atomically transition escrow status using optimistic locking.
- * Returns null if the record was modified concurrently (version mismatch).
+ * Throws EscrowConflictError if the record was modified concurrently (version mismatch).
  */
 async function transitionStatus(
   escrowId: string,
@@ -167,7 +184,9 @@ async function transitionStatus(
     return toRecord(row);
   } catch (err: any) {
     // Prisma throws P2025 when version check fails (record not found by composite where)
-    if (err?.code === "P2025") return null;
+    if (err?.code === "P2025") {
+      throw new EscrowConflictError(escrowId, existing.version);
+    }
     throw err;
   }
 }
