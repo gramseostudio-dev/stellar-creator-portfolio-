@@ -345,10 +345,17 @@ model MatchNotification {
 
 model Escrow {
   id              String   @id @default(cuid())
+  bountyId        String
   creatorId       String
   clientId        String
+  freelancerUserId String?
   amount          Int
+  currency        String   @default("usd")
+  platformFeeCents Int     @default(0)
+  paymentIntentId String?
   status          String   @default("active")
+  receiptUrl      String?
+  failureMessage  String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   releasedAt      DateTime?
@@ -357,8 +364,10 @@ model Escrow {
   disputeReason   String?
   version         Int      @default(1)
 
+  @@index([bountyId])
   @@index([creatorId])
   @@index([clientId])
+  @@index([paymentIntentId])
   @@index([status])
   @@index([createdAt])
   @@index([creatorId, status])
