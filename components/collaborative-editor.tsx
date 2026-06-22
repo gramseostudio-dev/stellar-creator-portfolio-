@@ -9,7 +9,7 @@
  * - Renders a full TipTap rich-text editor with starter-kit formatting
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Collaboration from '@tiptap/extension-collaboration'
@@ -65,14 +65,8 @@ export function CollaborativeEditor({
     process.env.NEXT_PUBLIC_COLLAB_WS_URL ??
     'ws://localhost:1234'
 
-  const [token, setToken] = useState<string | undefined>(authToken)
-
-  // Sync prop changes to state
-  useEffect(() => {
-    if (authToken) {
-      setToken(authToken)
-    }
-  }, [authToken])
+  const [tokenState, setTokenState] = useState<string | undefined>()
+  const token = authToken ?? tokenState
 
   // Fetch token if not provided as a prop
   useEffect(() => {
@@ -89,7 +83,7 @@ export function CollaborativeEditor({
         if (res.ok) {
           const data = await res.json()
           if (active && data.token) {
-            setToken(data.token)
+            setTokenState(data.token)
           }
         }
       } catch (err) {
@@ -106,42 +100,43 @@ export function CollaborativeEditor({
   // Stable user identity for this session
   const user = useMemo(
     () => ({ name: randomName(), color: randomColor() }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   )
 
-  // Yjs document & provider – both scoped to docId so they are fully
-  // destroyed and recreated whenever the document changes, preventing leaks.
-  const [ydoc, setYdoc] = useState<Y.Doc | null>(null)
-  const [provider, setProvider] = useState<WebsocketProvider | null>(null)
+  // Create a fresh Y.Doc for this docId/token
+  const ydoc = useMemo(() => {
+    if (!token) return null
+    return new Y.Doc()
+  }, [token])
 
+  // Cleanup Y.Doc on change/unmount
   useEffect(() => {
-    if (!token) return
+    return () => {
+      if (ydoc) {
+        ydoc.destroy()
+      }
+    }
+  }, [ydoc])
 
-    // Create a fresh Y.Doc for this docId
-    const newYdoc = new Y.Doc()
-    setYdoc(newYdoc)
-
-    const newProvider = new WebsocketProvider(serverUrl, docId, newYdoc, {
+  // Create provider
+  const provider = useMemo(() => {
+    if (!token || !ydoc) return null
+    const newProvider = new WebsocketProvider(serverUrl, docId, ydoc, {
       params: { token },
     })
-    setProvider(newProvider)
-
     // Broadcast our presence
     newProvider.awareness.setLocalStateField('user', user)
+    return newProvider
+  }, [token, ydoc, serverUrl, docId, user])
 
+  // Cleanup provider on change/unmount
+  useEffect(() => {
     return () => {
-      // Destroy provider first (closes WS + clears awareness)
-      newProvider.destroy()
-      setProvider(null)
-
-      // Destroy the Y.Doc to release all CRDT state and event listeners
-      newYdoc.destroy()
-      setYdoc(null)
+      if (provider) {
+        provider.destroy()
+      }
     }
-    // Re-connect only when docId, server, or token changes
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docId, serverUrl, token])
+  }, [provider])
 
   const editor = useEditor({
     extensions: [
