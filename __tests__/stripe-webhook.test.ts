@@ -8,19 +8,37 @@ import {
   getEscrow,
   findEscrowByPaymentIntent,
 } from '@/lib/payments/escrow-service'
+import { prisma } from '@/lib/prisma'
+
+const BOUNTY_ID = 'b-test-webhook'
+const CREATOR_ID = 'creator-webhook'
+const CLIENT_ID = 'u1'
 
 describe('processStripeWebhookEvent', () => {
-  beforeEach(() => {
-    __resetEscrowStoreForTests()
+  beforeEach(async () => {
+    await __resetEscrowStoreForTests()
+    // Ensure a bounty exists for createEscrow
+    await prisma.bounty.upsert({
+      where: { id: BOUNTY_ID },
+      update: {},
+      create: {
+        id: BOUNTY_ID,
+        creatorId: CREATOR_ID,
+        title: 'Test Bounty for Webhook',
+        description: 'Auto-created by webhook tests',
+        budget: 1000,
+        deadline: new Date('2027-01-01'),
+      },
+    })
   })
 
-  it('marks escrow funded on amount_capturable_updated', async () => {
-    const e = createEscrow({
-      bountyId: 'b-1',
-      clientUserId: 'u1',
+  it('marks escrow funded on amount_capturable_updated via metadata escrowId', async () => {
+    const e = await createEscrow({
+      bountyId: BOUNTY_ID,
+      clientUserId: CLIENT_ID,
       amountCents: 1000,
     })
-    attachPaymentIntent(e.id, 'pi_abc')
+    await attachPaymentIntent(e.id, 'pi_abc')
 
     const pi = {
       id: 'pi_abc',
@@ -38,16 +56,16 @@ describe('processStripeWebhookEvent', () => {
     } as Stripe.Event
 
     await processStripeWebhookEvent(event)
-    expect(getEscrow(e.id)?.status).toBe('funded_authorized')
+    expect((await getEscrow(e.id))?.status).toBe('funded_authorized')
   })
 
-  it('resolves escrow by payment intent id', async () => {
-    const e = createEscrow({
-      bountyId: 'b-1',
-      clientUserId: 'u1',
+  it('resolves escrow by payment intent id when no metadata escrowId', async () => {
+    const e = await createEscrow({
+      bountyId: BOUNTY_ID,
+      clientUserId: CLIENT_ID,
       amountCents: 1000,
     })
-    attachPaymentIntent(e.id, 'pi_xyz')
+    await attachPaymentIntent(e.id, 'pi_xyz')
 
     const pi = {
       id: 'pi_xyz',
@@ -62,6 +80,6 @@ describe('processStripeWebhookEvent', () => {
       data: { object: pi },
     } as Stripe.Event)
 
-    expect(findEscrowByPaymentIntent('pi_xyz')?.status).toBe('funded_authorized')
+    expect((await findEscrowByPaymentIntent('pi_xyz'))?.status).toBe('funded_authorized')
   })
 })
