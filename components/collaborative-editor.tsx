@@ -9,7 +9,7 @@
  * - Renders a full TipTap rich-text editor with starter-kit formatting
  */
 
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Collaboration from '@tiptap/extension-collaboration'
@@ -17,7 +17,7 @@ import CollaborationCursor from '@tiptap/extension-collaboration-cursor'
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
 
-// ── Presence colours ──────────────────────────────────────────────────────────
+// Presence colours
 const CURSOR_COLORS = [
   '#f97316', '#8b5cf6', '#06b6d4', '#10b981',
   '#f43f5e', '#eab308', '#3b82f6', '#ec4899',
@@ -33,12 +33,14 @@ function randomName() {
   return `${adjectives[Math.floor(Math.random() * adjectives.length)]} ${nouns[Math.floor(Math.random() * nouns.length)]}`
 }
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// Types
 interface CollaborativeEditorProps {
   /** Unique document identifier (e.g. bounty ID) */
   docId: string
   /** WebSocket server URL (defaults to env var or localhost:1234) */
   wsUrl?: string
+  /** Optional pre-provided authorization token */
+  authToken?: string
   /** Initial content (only applied when the doc is empty) */
   initialContent?: string
   /** Called whenever the document content changes */
@@ -48,10 +50,11 @@ interface CollaborativeEditorProps {
   className?: string
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
+// Component
 export function CollaborativeEditor({
   docId,
   wsUrl,
+  authToken,
   initialContent,
   onChange,
   readOnly = false,
@@ -61,6 +64,40 @@ export function CollaborativeEditor({
     wsUrl ??
     process.env.NEXT_PUBLIC_COLLAB_WS_URL ??
     'ws://localhost:1234'
+
+  const [token, setToken] = useState<string | undefined>(authToken)
+
+  // Fetch token if not provided as a prop
+  useEffect(() => {
+    if (authToken) {
+      setToken(authToken)
+      return
+    }
+
+    let active = true
+    async function fetchToken() {
+      try {
+        const res = await fetch('/api/collab', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'token', docName: docId }),
+        })
+        if (res.ok) {
+          const data = await res.json()
+          if (active && data.token) {
+            setToken(data.token)
+          }
+        }
+      } catch (err) {
+        console.error('[CollaborativeEditor] Failed to fetch token:', err)
+      }
+    }
+
+    fetchToken()
+    return () => {
+      active = false
+    }
+  }, [docId, authToken])
 
   // Stable user identity for this session
   const user = useMemo(
@@ -75,11 +112,15 @@ export function CollaborativeEditor({
   const providerRef = useRef<WebsocketProvider | null>(null)
 
   useEffect(() => {
+    if (!token) return
+
     // Create a fresh Y.Doc for this docId
     const ydoc = new Y.Doc()
     ydocRef.current = ydoc
 
-    const provider = new WebsocketProvider(serverUrl, docId, ydoc)
+    const provider = new WebsocketProvider(serverUrl, docId, ydoc, {
+      params: { token },
+    })
     providerRef.current = provider
 
     // Broadcast our presence
@@ -94,9 +135,9 @@ export function CollaborativeEditor({
       ydoc.destroy()
       ydocRef.current = null
     }
-    // Re-connect only when docId or server changes
+    // Re-connect only when docId, server, or token changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docId, serverUrl])
+  }, [docId, serverUrl, token])
 
   const editor = useEditor({
     extensions: [
@@ -258,7 +299,7 @@ export function CollaborativeEditor({
   )
 }
 
-// ── Toolbar button ─────────────────────────────────────────────────────────────
+// Toolbar button
 function ToolbarButton({
   onClick,
   active,
