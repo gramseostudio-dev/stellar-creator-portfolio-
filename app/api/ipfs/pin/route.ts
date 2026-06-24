@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'valid CIDv1 required' }, { status: 400 });
     }
 
-    return NextResponse.json({ cid, retried: true }, { status: 202 });
+    return NextResponse.json({ cid, retryAccepted: true }, { status: 202 });
   }
 
   const form = await req.formData();

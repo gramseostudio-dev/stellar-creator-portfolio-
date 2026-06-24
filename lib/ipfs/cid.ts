@@ -45,7 +45,7 @@ export function assertValidCidV1(cid: string): void {
   try {
     const parsed = CID.parse(cid);
     if (parsed.version !== 1) {
-      throw new InvalidCidError('CID must be CIDv1');
+      throw new InvalidCidError('CID must be version 1');
     }
   } catch (err) {
     if (err instanceof InvalidCidError) throw err;

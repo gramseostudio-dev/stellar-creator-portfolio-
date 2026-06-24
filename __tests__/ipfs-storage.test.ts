@@ -5,6 +5,7 @@ import {
   computeSha256,
   createRawCidV1FromSha256,
   loadPinRegistry,
+  retryPin,
   uploadToIpfs,
   sha256ToCid,
 } from '@/lib/ipfs/client';
@@ -53,6 +54,7 @@ function randomSha256Hex(seed: number): string {
 
 beforeEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
   localStorage.clear();
   vi.restoreAllMocks();
   vi.stubGlobal('XMLHttpRequest', MockXMLHttpRequest);
@@ -143,6 +145,35 @@ describe('IPFS CID storage', () => {
         sha256,
       }),
     ]);
+  });
+
+  it('retries pin verification with backoff until the CID resolves', async () => {
+    vi.useFakeTimers();
+
+    const cid = createRawCidV1FromSha256('3'.repeat(64));
+    let postAttempts = 0;
+    let probeAttempts = 0;
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: unknown, init?: RequestInit) => {
+        if (init?.method === 'POST') {
+          postAttempts += 1;
+          return { ok: true, status: 202 };
+        }
+
+        probeAttempts += 1;
+        return probeAttempts >= 3 ? { ok: true, status: 200 } : { ok: false, status: 404 };
+      }),
+    );
+
+    const retryPromise = retryPin(cid);
+
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    await expect(retryPromise).resolves.toBe(true);
+    expect(postAttempts).toBe(3);
+    expect(probeAttempts).toBeGreaterThanOrEqual(3);
   });
 
   it('migrates legacy pseudo-CIDs in localStorage to valid CIDv1 records', () => {
