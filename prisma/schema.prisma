@@ -469,6 +469,32 @@ enum AuditStatus {
   DENIED
 }
 
+// ── Messaging ────────────────────────────────────────────────────────────
+
+/// Archived messages — moved from Redis after TTL expiry via background job.
+model Message {
+  id            String   @id
+  threadId      String
+  senderId      String
+  recipientId   String
+  ciphertext    String
+  iv            String
+  createdAt     DateTime
+  attachment    Json?    /// { name, type, size, data (base64) }
+  status        String   @default("sent")   /// sent | delivered | read
+  readBy        String[] @default([])
+  metadata      Json?
+
+  /// Cursor for archive chronological ordering
+  archivedAt    DateTime @default(now())
+  expiresAt     DateTime /// when the Redis copy expired
+
+  @@index([threadId, createdAt])
+  @@index([senderId])
+  @@index([recipientId])
+  @@index([expiresAt])
+}
+
 // ── Soroban Sequence Management ──────────────────────────────────────────
 
 model SequenceLock {
