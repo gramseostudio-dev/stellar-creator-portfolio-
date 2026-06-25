@@ -557,3 +557,23 @@ model SorobanTransaction {
   @@index([status])
   @@unique([accountId, sequence])
 }
+
+// ── Centralized Error Reporting ────────────────────────────────────────────
+model ErrorLog {
+  id          String   @id
+  timestamp   DateTime
+  level       String
+  message     String
+  stack       String?
+  context     Json
+  url          String?
+  userAgent   String?
+  environment String
+
+  createdAt   DateTime @default(now())
+
+  @@index([timestamp])
+  @@index([level])
+  @@index([environment])
+}
+
